@@ -1,6 +1,7 @@
 #include "ukf.h"
 #include "Eigen/Dense"
 #include <iostream>
+#include <fstream>
 
 using namespace std;
 using Eigen::MatrixXd;
@@ -28,7 +29,7 @@ UKF::UKF() {
   std_a_ = 2;
 
   // Process noise standard deviation yaw acceleration in rad/s^2
-  std_yawdd_ = 0.3;
+  std_yawdd_ = 1;
 
   //DO NOT MODIFY measurement noise values below these are provided by the sensor manufacturer.
   // Laser measurement noise standard deviation position1 in m
@@ -72,8 +73,32 @@ UKF::UKF() {
     weights_(i) =  0.5 / (n_aug_ + lambda_);
   }
 
+  // prediction parameters
+  x_aug = VectorXd(n_aug_);
 
+  P_aug = MatrixXd(n_aug_, n_aug_);
+  P_aug.fill(0.0);
 
+  Xsig_aug = MatrixXd(n_aug_, 2*n_aug_+1);
+  Xsig_aug.fill(0.0);
+
+  Xsig_pred_ = MatrixXd(n_x_, 2*n_aug_+1);
+  Xsig_pred_.fill(0.0);
+
+  // Laser update -- noise covariance
+  R_laser = MatrixXd(2, 2); // 2X2
+  R_laser <<  std_laspx_*std_laspx_, 0,
+              0, std_laspy_*std_laspy_;
+
+  // Radar update -- noise covariance
+  R_Radar = MatrixXd(3, 3);
+  R_Radar <<    std_radr_*std_radr_, 0, 0,
+                0, std_radphi_*std_radphi_, 0,
+                0, 0,std_radrd_*std_radrd_;
+
+  // NIS measurements
+  NIS_radar = 0.0;
+  NIS_laser = 0.0;
 }
 
 UKF::~UKF() {}
@@ -90,7 +115,7 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
   measurements.
   */
   if (!is_initialized_) {
-    x_ << 1, 1, 1, 1, 1;
+    x_.fill(0.0);
     P_ << 1, 0, 0, 0, 0,
             0, 1, 0, 0, 0,
             0, 0, 1, 0, 0,
@@ -111,7 +136,9 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
       float py = rho*sin(phi);
       float v  = sqrt(pow(rho_d*cos(phi), 2) + pow(rho_d*sin(phi), 2));
 
-      x_ << px, py, v, 0, 0;
+      x_[0] = px;
+      x_[1] = py;
+      x_[2] = v;
       cout << "\n Initialized with RADAR : x_ :\n" << x_ << endl;
     }
 
@@ -121,6 +148,7 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
     return;
   }
 
+  /*  ##################  Control Flow  ##################  */
   float dt = (meas_package.timestamp_ - time_us_) / 1000000.0; // dt in ms
   time_us_ = meas_package.timestamp_;
 
@@ -131,6 +159,7 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
   } else if (meas_package.sensor_type_==MeasurementPackage::RADAR && use_radar_) {
     UpdateRadar(meas_package);
   }
+  /*  ##################  ##################  ##################  */
 }
 
 /**
@@ -146,28 +175,21 @@ void UKF::Prediction(double delta_t) {
   vector, x_. Predict sigma points, the state, and the state covariance matrix.
   */
 
-  VectorXd x_aug = VectorXd(n_aug_);
   x_aug.fill(0.0);
   x_aug.head(5) = x_;
 
-  MatrixXd P_aug = MatrixXd(n_aug_, n_aug_);
-  P_aug.fill(0.0);
   P_aug.topLeftCorner(n_x_, n_x_) = P_;
   P_aug(5, 5) = pow(std_a_, 2);
   P_aug(6, 6) = pow(std_yawdd_, 2);
 
   MatrixXd A = P_aug.llt().matrixL();
 
-  MatrixXd Xsig_aug = MatrixXd(n_aug_, 2*n_aug_+1);
-  Xsig_aug.fill(0.0);
   Xsig_aug.col(0) = x_aug;
   for (int i=0; i<n_aug_; i++) {
     Xsig_aug.col(i+1) = x_aug + sqrt(lambda_+n_aug_) * A.col(i);
     Xsig_aug.col(i+1+n_aug_) = x_aug - sqrt(lambda_+n_aug_) * A.col(i);
   }
 
-  Xsig_pred_ = MatrixXd(n_x_, 2*n_aug_+1);
-  Xsig_pred_.fill(0.0);
   MatrixXd temp = MatrixXd(Xsig_aug.cols(), 1);
   temp.fill(0.0);
 
@@ -220,9 +242,8 @@ void UKF::Prediction(double delta_t) {
   P_.fill(0.0);
   for (int i = 0; i < 2*n_aug_+1; i++) {
     VectorXd x_diff = Xsig_pred_.col(i) - x_;
-    //angle normalization; always do so when taking difference between angles.
-    while (x_diff(3)> M_PI) x_diff(3)-=2.*M_PI;
-    while (x_diff(3)<-M_PI) x_diff(3)+=2.*M_PI;
+
+    Normalize(&x_diff(3));
 
     P_ += weights_(i) * x_diff * x_diff.transpose();
   }
@@ -265,10 +286,6 @@ void UKF::UpdateLidar(MeasurementPackage meas_package) {
     S += weights_[i] * z_diff * z_diff.transpose();
   }
 
-  MatrixXd R_laser = MatrixXd(n_z, n_z); // 2X2
-  R_laser << std_laspx_*std_laspx_, 0,
-          0, std_laspy_*std_laspy_;
-
   S += R_laser;
 
   MatrixXd Tc = MatrixXd(n_x_, n_z);
@@ -284,6 +301,16 @@ void UKF::UpdateLidar(MeasurementPackage meas_package) {
 
   x_ += K * z_diff;
   P_ -= K * S * K.transpose();
+
+  NIS_laser = z_diff.transpose() * S.inverse() * z_diff;
+
+//  // Optimize using NIS value
+//  cout << "Current NIS for LIDAR -->\t" << NIS_laser << endl;
+//  std::ofstream ofs;
+//  ofs.open ("lidar_nis.txt", std::ofstream::out | std::ofstream::app);
+//  ofs << NIS_laser;
+//  ofs << "\n";
+//  ofs.close();
 }
 
 /**
@@ -329,17 +356,11 @@ void UKF::UpdateRadar(MeasurementPackage meas_package) {
   S.fill(0.0);
   for (int i = 0; i< 2*n_aug_+1; i++){
     VectorXd z_diff = Zsig.col(i) - z_pred;
-    //angle normalization; always do so when taking difference between angles.
-    while (z_diff(1)> M_PI) z_diff(1)-=2.*M_PI;
-    while (z_diff(1)<-M_PI) z_diff(1)+=2.*M_PI;
+
+    Normalize(&z_diff(1));
 
     S += weights_(i) * z_diff * z_diff.transpose();
   }
-
-  MatrixXd R_Radar = MatrixXd(n_z,n_z);
-  R_Radar <<    std_radr_*std_radr_, 0, 0,
-          0, std_radphi_*std_radphi_, 0,
-          0, 0,std_radrd_*std_radrd_;
 
   S += R_Radar;
 
@@ -348,11 +369,9 @@ void UKF::UpdateRadar(MeasurementPackage meas_package) {
   for (int i=0; i<2 * n_aug_ + 1; i++) {
     VectorXd z_diff = Zsig.col(i) - z_pred;
     VectorXd x_diff = Xsig_pred_.col(i) - x_;
-    //angle normalization; always do so when taking difference between angles.
-    while (z_diff(1)> M_PI) z_diff(1)-=2.*M_PI;
-    while (z_diff(1)<-M_PI) z_diff(1)+=2.*M_PI;
-    while (x_diff(3)> M_PI) x_diff(3)-=2.*M_PI;
-    while (x_diff(3)<-M_PI) x_diff(3)+=2.*M_PI;
+
+    Normalize(&z_diff(1));
+    Normalize(&x_diff(3));
 
     Tc += weights_(i) * x_diff * z_diff.transpose();
   }
@@ -360,9 +379,24 @@ void UKF::UpdateRadar(MeasurementPackage meas_package) {
   MatrixXd K = Tc * S.inverse();
   VectorXd z_diff = z - z_pred;
 
-  while (z_diff(1)> M_PI) z_diff(1)-=2.*M_PI;
-  while (z_diff(1)<-M_PI) z_diff(1)+=2.*M_PI;
+  Normalize(&z_diff(1));
 
   x_ += K * z_diff;
   P_ -= K * S * K.transpose();
+
+  NIS_radar = z_diff.transpose() * S.inverse() * z_diff;
+
+  // Optimize using NIS value
+//  cout << "Current NIS for RADAR -->\t" << NIS_radar << endl;
+//  std::ofstream ofs;
+//  ofs.open ("radar_nis.txt", std::ofstream::out | std::ofstream::app);
+//  ofs << NIS_radar;
+//  ofs << "\n";
+//  ofs.close();
+}
+
+void UKF::Normalize(double *angle) {
+  //angle normalization; always do so when taking difference between angles.
+  while (*angle >  M_PI) *angle-=2.0*M_PI;
+  while (*angle < -M_PI) *angle+=2.0*M_PI;
 }

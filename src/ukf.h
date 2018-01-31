@@ -67,6 +67,22 @@ public:
   ///* Sigma point spreading parameter
   double lambda_;
 
+  ///* prediction parameters
+  VectorXd x_aug;
+
+  MatrixXd P_aug;
+
+  MatrixXd Xsig_aug;
+
+  ///* Laser Update
+  MatrixXd R_laser;
+
+  ///* Radar Update
+  MatrixXd R_Radar;
+
+  ///* NIS  measurement;
+  double NIS_radar, NIS_laser;
+
 
   /**
    * Constructor
@@ -77,6 +93,11 @@ public:
    * Destructor
    */
   virtual ~UKF();
+
+  /**
+   * Normalize angle -pi to pi
+   */
+  void Normalize(double *angle);
 
   /**
    * ProcessMeasurement
