@@ -1,3 +1,0 @@
-/home/muhsin/code/sdv/2term/part2/project2/ukf/build/CMakeFiles/edit_cache.dir
-/home/muhsin/code/sdv/2term/part2/project2/ukf/build/CMakeFiles/UnscentedKF.dir
-/home/muhsin/code/sdv/2term/part2/project2/ukf/build/CMakeFiles/rebuild_cache.dir
