@@ -37,6 +37,31 @@ Note: This project requires the Udacity open source simulator : [Udacity term 2 
   ---
   
   ## Result
+  The make file runs without any errors.
+  The RMSE for dataset 1 is as follows :
+  
+  Input |   MSE  
+  ----- | -------
+   px   | 0.0701
+   py   | 0.0839 
+   vx   | 0.3446
+   vy   | 0.2293
+  
+  The RMSE for same dataset running [EKF](https://github.com/askmuhsin/extended-kalman-flter) :
+  
+  Input |   MSE  
+  ----- | -------
+   px   | 0.0974 
+   py   | 0.0855 
+   vx   | 0.4517 
+   vy   | 0.4404 
+   
+   NIS (normalized innovation squared) was used for optimizing the noise parameters. 
+   NIS of liadar and radar measurements visualized:
+   ![LIDAR-NIS](https://github.com/askmuhsin/unscented-kalman-filter/blob/master/NIS_visualize/lidar_1.png)
+   <br></br>
+   ![RADAR_NIS](https://github.com/askmuhsin/unscented-kalman-filter/blob/master/NIS_visualize/radar_1.png)
+   
   
   ## TODO
   - [x] finish control flow
